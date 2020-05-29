@@ -52,10 +52,12 @@ func (*Deb) Package(info *nfpm.Info, deb io.Writer) (err error) {
 		info.Arch = arch
 	}
 
-	if info.SystemdUnit != "" {
-		unit := filepath.Base(info.SystemdUnit)
-		dst := filepath.Join("/lib/systemd/system/", unit)
-		info.Files[info.SystemdUnit] = fmt.Sprintf("%s:root", dst)
+	if len(info.SystemdUnits) > 0 {
+		for _, systemdUnit := range info.SystemdUnits {
+			unit := filepath.Base(systemdUnit)
+			dst := filepath.Join("/lib/systemd/system/", unit)
+			info.Files[systemdUnit] = fmt.Sprintf("%s:root", dst)
+		}
 		info.Depends = append(info.Depends, "systemd")
 	}
 
@@ -258,8 +260,8 @@ func addControlScripts(out *tar.Writer, info *nfpm.Info) error {
 	for _, dest := range []string{"preinst", "postinst", "prerm", "postrm", "rules"} {
 		scripts[dest] = new(bytes.Buffer)
 	}
-	if info.SystemdUnit != "" {
-		unit := filepath.Base(info.SystemdUnit)
+	for _, systemdUnit := range info.SystemdUnits {
+		unit := filepath.Base(systemdUnit)
 		if err := addScriptFromString(scripts["postinst"], "#!/bin/sh\n\nset -e\n\n"); err != nil {
 			return err
 		}

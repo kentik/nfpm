@@ -74,7 +74,7 @@ func (*RPM) Package(info *nfpm.Info, w io.Writer) error {
 		return err
 	}
 
-	if err = addSystemdUnit(info, rpm); err != nil {
+	if err = addSystemdUnits(info, rpm); err != nil {
 		return err
 	}
 
@@ -210,22 +210,23 @@ func addScriptFiles(info *nfpm.Info, rpm *rpmpack.RPM) error {
 	return nil
 }
 
-func addSystemdUnit(info *nfpm.Info, rpm *rpmpack.RPM) error {
-	if info.SystemdUnit != "" {
-		unit := filepath.Base(info.SystemdUnit)
-		dst := filepath.Join("/lib/systemd/system/", unit)
-		err := copyToRPM(rpm, info.SystemdUnit, dst, false, "root")
-		if err != nil {
-			return err
+func addSystemdUnits(info *nfpm.Info, rpm *rpmpack.RPM) error {
+	if len(info.SystemdUnits) > 0 {
+		for _, systemdUnit := range info.SystemdUnits {
+			unit := filepath.Base(systemdUnit)
+			dst := filepath.Join("/lib/systemd/system/", unit)
+			err := copyToRPM(rpm, systemdUnit, dst, false, "root")
+			if err != nil {
+				return err
+			}
+			rpm.AddPostin(strings.ReplaceAll(scriptSystemdPostinst, "%{package_unit}", unit))
+			rpm.AddPreun(strings.ReplaceAll(scriptSystemdPreun, "%{package_unit}", unit))
+			rpm.AddPostun(strings.ReplaceAll(scriptSystemdPostun, "%{package_unit}", unit))
 		}
-		rpm.AddPostin(strings.ReplaceAll(scriptSystemdPostinst, "%{package_unit}", unit))
-		rpm.AddPreun(strings.ReplaceAll(scriptSystemdPreun, "%{package_unit}", unit))
-		rpm.AddPostun(strings.ReplaceAll(scriptSystemdPostun, "%{package_unit}", unit))
 		// TODO: it would be much better to use `Requires(pre):`, etc...,
 		// but the option is missing from rpmpack public api
 		info.Depends = append(info.Depends, "systemd")
 	}
-
 	return nil
 }
 

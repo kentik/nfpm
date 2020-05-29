@@ -146,7 +146,7 @@ type Overridables struct {
 	Recommends   []string          `yaml:"recommends,omitempty"`
 	Suggests     []string          `yaml:"suggests,omitempty"`
 	Conflicts    []string          `yaml:"conflicts,omitempty"`
-	SystemdUnit  string            `yaml:"systemd_unit,omitempty"`
+	SystemdUnits []string          `yaml:"systemd_units,omitempty"`
 	User         string            `yaml:"user,omitempty"`
 	Files        map[string]string `yaml:"files,omitempty"`
 	ConfigFiles  map[string]string `yaml:"config_files,omitempty"`
