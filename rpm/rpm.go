@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/goreleaser/nfpm"
+	"github.com/goreleaser/nfpm/glob"
 )
 
 // nolint: gochecknoinits
@@ -69,6 +71,14 @@ func (*RPM) Package(info *nfpm.Info, w io.Writer) error {
 	}
 
 	if err = addScriptFiles(info, rpm); err != nil {
+		return err
+	}
+
+	if err = addSystemdUnit(info, rpm); err != nil {
+		return err
+	}
+
+	if err = addUser(info, rpm); err != nil {
 		return err
 	}
 
@@ -200,6 +210,33 @@ func addScriptFiles(info *nfpm.Info, rpm *rpmpack.RPM) error {
 	return nil
 }
 
+func addSystemdUnit(info *nfpm.Info, rpm *rpmpack.RPM) error {
+	if info.SystemdUnit != "" {
+		unit := filepath.Base(info.SystemdUnit)
+		dst := filepath.Join("/lib/systemd/system/", unit)
+		err := copyToRPM(rpm, info.SystemdUnit, dst, false, "root")
+		if err != nil {
+			return err
+		}
+		rpm.AddPostin(strings.ReplaceAll(scriptSystemdPostinst, "%{package_unit}", unit))
+		rpm.AddPreun(strings.ReplaceAll(scriptSystemdPreun, "%{package_unit}", unit))
+		rpm.AddPostun(strings.ReplaceAll(scriptSystemdPostun, "%{package_unit}", unit))
+		// TODO: it would be much better to use `Requires(pre):`, etc...,
+		// but the option is missing from rpmpack public api
+		info.Depends = append(info.Depends, "systemd")
+	}
+
+	return nil
+}
+
+func addUser(info *nfpm.Info, rpm *rpmpack.RPM) error {
+	if info.User != "" {
+		rpm.AddPrein(strings.ReplaceAll(scriptCreateUser, "%{package_user}", info.User))
+	}
+
+	return nil
+}
+
 func addEmptyDirsRPM(info *nfpm.Info, rpm *rpmpack.RPM) {
 	for _, dir := range info.EmptyFolders {
 		rpm.AddFile(
@@ -207,28 +244,50 @@ func addEmptyDirsRPM(info *nfpm.Info, rpm *rpmpack.RPM) {
 				Name:  dir,
 				Mode:  uint(040755),
 				MTime: uint32(time.Now().Unix()),
-				Owner: "root",
-				Group: "root",
+				Owner: info.User,
+				Group: info.User,
 			},
 		)
 	}
 }
 
 func createFilesInsideRPM(info *nfpm.Info, rpm *rpmpack.RPM) error {
-	files, err := info.FilesToCopy()
+	copyFunc := func(files map[string]string, config bool) error {
+		for srcglob, dstraw := range files {
+			dstroot, user, _ := getFilesAttr(dstraw)
+			if user == "" {
+				user = info.User
+			}
+			globbed, err := glob.Glob(srcglob, dstroot)
+			if err != nil {
+				return err
+			}
+			for src, dst := range globbed {
+				// when used as a lib, target may not be set.
+				// in that case, src will always have the empty sufix, and all
+				// files will be ignored.
+				if info.Target != "" && strings.HasSuffix(src, info.Target) {
+					fmt.Printf("skipping %s because it has the suffix %s", src, info.Target)
+					continue
+				}
+				err := copyToRPM(rpm, src, dst, config, user)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
+	}
+	err := copyFunc(info.Files, false)
 	if err != nil {
 		return err
 	}
-	for _, file := range files {
-		err := copyToRPM(rpm, file.Source, file.Destination, file.Config)
-		if err != nil {
-			return err
-		}
-	}
+
 	return nil
 }
 
-func copyToRPM(rpm *rpmpack.RPM, src, dst string, config bool) error {
+func copyToRPM(rpm *rpmpack.RPM, src, dst string, config bool, user string) error {
 	file, err := os.OpenFile(src, os.O_RDONLY, 0600) //nolint:gosec
 	if err != nil {
 		return errors.Wrap(err, "could not add file to the archive")
@@ -253,8 +312,8 @@ func copyToRPM(rpm *rpmpack.RPM, src, dst string, config bool) error {
 		Body:  data,
 		Mode:  uint(info.Mode()),
 		MTime: uint32(info.ModTime().Unix()),
-		Owner: "root",
-		Group: "root",
+		Owner: user,
+		Group: user,
 	}
 
 	if config {
@@ -264,4 +323,20 @@ func copyToRPM(rpm *rpmpack.RPM, src, dst string, config bool) error {
 	rpm.AddFile(rpmFile)
 
 	return nil
+}
+
+func getFilesAttr(raw string) (name, user, mode string) {
+	parts := strings.Split(raw, ":")
+	name, user, mode = raw, "", ""
+	if len(parts) > 0 {
+		name = parts[0]
+	}
+	if len(parts) > 1 {
+		user = parts[1]
+	}
+	if len(parts) > 2 {
+		mode = parts[2]
+	}
+
+	return name, user, mode
 }
