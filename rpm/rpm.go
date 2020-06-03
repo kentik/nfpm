@@ -280,7 +280,13 @@ func createFilesInsideRPM(info *nfpm.Info, rpm *rpmpack.RPM) error {
 
 		return nil
 	}
+
 	err := copyFunc(info.Files, false)
+	if err != nil {
+		return err
+	}
+
+	err = copyFunc(info.ConfigFiles, true)
 	if err != nil {
 		return err
 	}
