@@ -11,11 +11,11 @@ require (
 	github.com/golangci/golangci-lint v1.27.0
 	github.com/google/rpmpack v0.0.0-20191226140753-aa36bfddb3a0
 	github.com/imdario/mergo v0.3.9
-	github.com/mattn/go-zglob v0.0.1
+	github.com/mattn/go-zglob v0.0.2
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/sassoftware/go-rpmutils v0.0.0-20190420191620-a8f1baeba37b
-	github.com/stretchr/testify v1.6.0
+	github.com/stretchr/testify v1.6.1
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
 	gopkg.in/yaml.v2 v2.3.0
 )
