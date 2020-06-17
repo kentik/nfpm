@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sassoftware/go-rpmutils"
@@ -74,6 +76,51 @@ func exampleInfo() *nfpm.Info {
 			},
 		},
 	})
+}
+
+func exampleScripts(info *nfpm.Info) (*Scripts, error) {
+	scripts := &Scripts{}
+
+	var (
+		data []byte
+		err  error
+	)
+
+	for _, systemdUnit := range info.SystemdUnits {
+		unit := filepath.Base(systemdUnit)
+		scripts.PostInstall = append(scripts.PostInstall,
+			strings.ReplaceAll(scriptSystemdPostinst, "%{package_unit}", unit))
+		scripts.PreRemove = append(scripts.PreRemove,
+			strings.ReplaceAll(scriptSystemdPreun, "%{package_unit}", unit))
+		scripts.PostRemove = append(scripts.PostRemove,
+			strings.ReplaceAll(scriptSystemdPostun, "%{package_unit}", unit))
+	}
+
+	data, err = ioutil.ReadFile(info.Scripts.PreInstall)
+	if err != nil {
+		return nil, err
+	}
+	scripts.PreInstall = append(scripts.PreInstall, string(data))
+
+	data, err = ioutil.ReadFile(info.Scripts.PostInstall)
+	if err != nil {
+		return nil, err
+	}
+	scripts.PostInstall = append(scripts.PostInstall, string(data))
+
+	data, err = ioutil.ReadFile(info.Scripts.PreRemove)
+	if err != nil {
+		return nil, err
+	}
+	scripts.PreRemove = append(scripts.PreRemove, string(data))
+
+	data, err = ioutil.ReadFile(info.Scripts.PostRemove)
+	if err != nil {
+		return nil, err
+	}
+	scripts.PostRemove = append(scripts.PostRemove, string(data))
+
+	return scripts, nil
 }
 
 func TestRPM(t *testing.T) {
@@ -304,4 +351,52 @@ func TestRPMMultiArch(t *testing.T) {
 		info = ensureValidArch(info)
 		assert.Equal(t, archToRPM[k], info.Arch)
 	}
+}
+
+func TestRPMSystemdUnitAndScripts(t *testing.T) {
+	info := exampleInfo()
+
+	info.SystemdUnits = []string{
+		"../testdata/test.service",
+	}
+
+	f, err := ioutil.TempFile(".", fmt.Sprintf("%s-%s-*.rpm", info.Name, info.Version))
+	defer func() {
+		_ = f.Close()
+		err = os.Remove(f.Name())
+		assert.NoError(t, err)
+	}()
+	assert.NoError(t, err)
+	err = Default.Package(info, f)
+	assert.NoError(t, err)
+	file, err := os.OpenFile(f.Name(), os.O_RDONLY, 0600) //nolint:gosec
+	assert.NoError(t, err)
+	rpm, err := rpmutils.ReadRpm(file)
+	assert.NoError(t, err)
+
+	scripts, err := exampleScripts(info)
+	assert.NoError(t, err)
+
+	var (
+		preInstall  = strings.Join(scripts.PreInstall, "\n")
+		preRemove   = strings.Join(scripts.PreRemove, "\n")
+		postInstall = strings.Join(scripts.PostInstall, "\n")
+		postRemove  = strings.Join(scripts.PostRemove, "\n")
+	)
+
+	data, err := rpm.Header.GetString(tagPrein)
+	assert.NoError(t, err)
+	assert.Equal(t, preInstall, data, "Preinstall script does not match")
+
+	data, err = rpm.Header.GetString(tagPreun)
+	assert.NoError(t, err)
+	assert.Equal(t, preRemove, data, "Preremove script does not match")
+
+	data, err = rpm.Header.GetString(tagPostin)
+	assert.NoError(t, err)
+	assert.Equal(t, postInstall, data, "Postinstall script does not match")
+
+	data, err = rpm.Header.GetString(tagPostun)
+	assert.NoError(t, err)
+	assert.Equal(t, postRemove, data, "Postremove script does not match")
 }

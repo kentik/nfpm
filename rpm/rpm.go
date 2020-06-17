@@ -31,6 +31,13 @@ var Default = &RPM{}
 // RPM is a RPM packager implementation.
 type RPM struct{}
 
+type Scripts struct {
+	PreInstall  []string
+	PostInstall []string
+	PreRemove   []string
+	PostRemove  []string
+}
+
 // nolint: gochecknoglobals
 var archToRPM = map[string]string{
 	"amd64": "x86_64",
@@ -49,12 +56,17 @@ func ensureValidArch(info *nfpm.Info) *nfpm.Info {
 // Package writes a new RPM package to the given writer using the given info.
 func (*RPM) Package(info *nfpm.Info, w io.Writer) error {
 	var (
-		err  error
-		meta *rpmpack.RPMMetaData
-		rpm  *rpmpack.RPM
+		err     error
+		meta    *rpmpack.RPMMetaData
+		rpm     *rpmpack.RPM
+		scripts *Scripts
 	)
 	info = ensureValidArch(info)
 	if err = nfpm.Validate(info); err != nil {
+		return err
+	}
+
+	if scripts, err = loadScripts(info); err != nil {
 		return err
 	}
 
@@ -70,7 +82,7 @@ func (*RPM) Package(info *nfpm.Info, w io.Writer) error {
 		return err
 	}
 
-	if err = addScriptFiles(info, rpm); err != nil {
+	if err = addScripts(info, rpm, scripts); err != nil {
 		return err
 	}
 
@@ -174,37 +186,69 @@ func toRelation(items []string) (rpmpack.Relations, error) {
 	return relations, nil
 }
 
-func addScriptFiles(info *nfpm.Info, rpm *rpmpack.RPM) error {
+func loadScripts(info *nfpm.Info) (*Scripts, error) {
+	scripts := &Scripts{}
+
+	for _, systemdUnit := range info.SystemdUnits {
+		unit := filepath.Base(systemdUnit)
+		scripts.PostInstall = append(scripts.PostInstall,
+			strings.ReplaceAll(scriptSystemdPostinst, "%{package_unit}", unit))
+		scripts.PreRemove = append(scripts.PreRemove,
+			strings.ReplaceAll(scriptSystemdPreun, "%{package_unit}", unit))
+		scripts.PostRemove = append(scripts.PostRemove,
+			strings.ReplaceAll(scriptSystemdPostun, "%{package_unit}", unit))
+	}
+
 	if info.Scripts.PreInstall != "" {
 		data, err := ioutil.ReadFile(info.Scripts.PreInstall)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		rpm.AddPrein(string(data))
+		scripts.PreInstall = append(scripts.PreInstall, string(data))
 	}
 
 	if info.Scripts.PreRemove != "" {
 		data, err := ioutil.ReadFile(info.Scripts.PreRemove)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		rpm.AddPreun(string(data))
+		scripts.PreRemove = append(scripts.PreRemove, string(data))
 	}
 
 	if info.Scripts.PostInstall != "" {
 		data, err := ioutil.ReadFile(info.Scripts.PostInstall)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		rpm.AddPostin(string(data))
+		scripts.PostInstall = append(scripts.PostInstall, string(data))
 	}
 
 	if info.Scripts.PostRemove != "" {
 		data, err := ioutil.ReadFile(info.Scripts.PostRemove)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		rpm.AddPostun(string(data))
+		scripts.PostRemove = append(scripts.PostRemove, string(data))
+	}
+
+	return scripts, nil
+}
+
+func addScripts(info *nfpm.Info, rpm *rpmpack.RPM, scripts *Scripts) error {
+	if len(scripts.PreInstall) > 0 {
+		rpm.AddPrein(strings.Join(scripts.PreInstall, "\n"))
+	}
+
+	if len(scripts.PreRemove) > 0 {
+		rpm.AddPreun(strings.Join(scripts.PreRemove, "\n"))
+	}
+
+	if len(scripts.PostInstall) > 0 {
+		rpm.AddPostin(strings.Join(scripts.PostInstall, "\n"))
+	}
+
+	if len(scripts.PostRemove) > 0 {
+		rpm.AddPostun(strings.Join(scripts.PostRemove, "\n"))
 	}
 
 	return nil
@@ -219,9 +263,6 @@ func addSystemdUnits(info *nfpm.Info, rpm *rpmpack.RPM) error {
 			if err != nil {
 				return err
 			}
-			rpm.AddPostin(strings.ReplaceAll(scriptSystemdPostinst, "%{package_unit}", unit))
-			rpm.AddPreun(strings.ReplaceAll(scriptSystemdPreun, "%{package_unit}", unit))
-			rpm.AddPostun(strings.ReplaceAll(scriptSystemdPostun, "%{package_unit}", unit))
 		}
 		// TODO: it would be much better to use `Requires(pre):`, etc...,
 		// but the option is missing from rpmpack public api
