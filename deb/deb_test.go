@@ -337,11 +337,12 @@ func TestConffiles(t *testing.T) {
 	out := conffiles(&nfpm.Info{
 		Overridables: nfpm.Overridables{
 			ConfigFiles: map[string]string{
-				"fake": "/etc/fake",
+				"foo": "/etc/foo",
+				"bar": "/etc/bar:root:644",
 			},
 		},
 	})
-	assert.Equal(t, "/etc/fake\n", string(out), "should have a trailing empty line")
+	assert.Equal(t, "/etc/foo\n/etc/bar\n", string(out), "should have a trailing empty line")
 }
 
 func TestPathsToCreate(t *testing.T) {

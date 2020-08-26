@@ -435,7 +435,8 @@ func conffiles(info *nfpm.Info) []byte {
 	// nolint: prealloc
 	var confs []string
 	for _, dst := range info.ConfigFiles {
-		confs = append(confs, dst)
+		conf, _, _ := getFilesAttr(dst)
+		confs = append(confs, conf)
 	}
 	return []byte(strings.Join(confs, "\n") + "\n")
 }
